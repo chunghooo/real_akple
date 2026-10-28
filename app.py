@@ -136,7 +136,15 @@ def _cached_model():
     return detect.train_model()
 
 
-def _run_analysis(rows, raw_bytes, src, url, imgs):
+def _run_analysis(rows, raw_pages, src, url, imgs):
+    if isinstance(raw_pages, (list, dict)):
+        raw_bytes = json.dumps(raw_pages, ensure_ascii=False).encode("utf-8")
+    elif isinstance(raw_pages, str):
+        raw_bytes = raw_pages.encode("utf-8")
+    elif raw_pages is None:
+        raw_bytes = b""
+    else:
+        raw_bytes = raw_pages
     model = _cached_model()
     rows = detect.apply_model(rows, model)
     victim_raw = st.session_state.get("victim", "")
