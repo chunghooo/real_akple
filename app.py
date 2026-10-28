@@ -377,6 +377,8 @@ if rows:
                         m["name"] for m in models
                         if "generateContent" in m.get("supportedGenerationMethods", [])
                     ]
+                    candidates_m = [m for m in candidates_m
+                                    if not any(x in m for x in ("tts", "image", "audio", "live", "embedding", "thinking"))]
                     flash_lite = [m for m in candidates_m if "flash-lite" in m]
                     flash = [m for m in candidates_m if "flash" in m and "lite" not in m]
                     model_name = (flash_lite or flash or candidates_m)[-1]
@@ -396,6 +398,12 @@ if rows:
                                     "temperature": 0,
                                     "responseMimeType": "application/json",
                                 },
+                                # 악플 원문을 검토해야 하므로 안전 필터가 요청 자체를 막지 않게 함
+                                "safetySettings": [
+                                    {"category": c, "threshold": "BLOCK_NONE"}
+                                    for c in ("HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH",
+                                              "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_DANGEROUS_CONTENT")
+                                ],
                             },
                             timeout=60,
                         )
@@ -404,9 +412,16 @@ if rows:
                             hit_limit = True
                             break
                         data = resp.json()
-                        text_out = (
-                            data["candidates"][0]["content"]["parts"][0]["text"]
-                        )
+                        if resp.status_code != 200:
+                            st.error(f"Gemini 오류({resp.status_code}): {data.get('error', {}).get('message', '')} · 모델 {model_name}")
+                            hit_limit = True
+                            break
+                        if not data.get("candidates"):
+                            st.error(f"Gemini가 응답을 거부했어요: {data.get('promptFeedback', {}).get('blockReason', '이유 미상')} · 모델 {model_name}")
+                            hit_limit = True
+                            break
+                        text_out = data["candidates"][0]["content"]["parts"][0]["text"]
+                        text_out = text_out[text_out.find("["):text_out.rfind("]") + 1]
                         results = json.loads(text_out)
                         for item in results:
                             idx = item.get("i")
