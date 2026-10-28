@@ -145,6 +145,8 @@ def _run_analysis(rows, raw_pages, src, url, imgs):
         raw_bytes = b""
     else:
         raw_bytes = raw_pages
+    for r in rows:
+        r.update(detect.classify(r["text"]))
     model = _cached_model()
     rows = detect.apply_model(rows, model)
     victim_raw = st.session_state.get("victim", "")
@@ -261,13 +263,13 @@ if rows:
         r.setdefault("category", res.get("category", "미확인"))
 
     sel = st.session_state.get("sel", set())
-    ai_found = sum(1 for r in rows if r.get("severity", 0) >= 2 and r.get("ai") not in (None, "", "미확인"))
+    ai_found = sum(1 for r in rows if "AI 판단" in str(r.get("category", "")))
 
     st.divider()
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("출처", st.session_state.get("src", "미확인"))
     m2.metric("전체", len(rows))
-    m3.metric("악플 후보", sum(1 for r in rows if r.get("severity", 0) >= 2))
+    m3.metric("악플 후보", sum(1 for r in rows if r.get("label") == "악플"))
     m4.metric("그중 AI가 찾은 것", ai_found)
 
     with st.expander("📊 악플 현황 (유형 · 상습 작성자 · 날짜별 추이)", expanded=True):
@@ -450,11 +452,11 @@ if rows:
     )
 
     def _passes_filter(r):
-        if scope_filter == "악플만" and r.get("severity", 0) < 2:
+        if scope_filter == "악플만" and r.get("label") != "악플":
             return False
         if scope_filter == "선택한 것만" and r["id"] not in sel:
             return False
-        if cat_filter and r.get("category") not in cat_filter:
+        if cat_filter and not any(c in str(r.get("category", "")) for c in cat_filter):
             return False
         if search_filter:
             words = [w.strip() for w in search_filter.split(",") if w.strip()]
