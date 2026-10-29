@@ -586,26 +586,30 @@ if rows:
                             reason = item.get("r", "")
                             case_code = item.get("c", "없음")
                             legal = item.get("l", "")
-                            if verdict == "악플":
-                                r["gem"] = f"🔴 악플: {reason}"
-                                r["label"] = "악플"
-                                r["severity"] = max(r.get("severity", 0), 2)
-                                sel.add(r["id"])
-                            else:
-                                if r.get("severity", 0) >= 3:
-                                    r["gem"] = f"🟡 AI는 아님 판단: {reason}"
-                                else:
-                                    r["gem"] = f"🟢 아님: {reason}"
-                                    if r.get("severity", 0) == 2 and r.get("category") != "신상노출":
-                                        r["severity"] = 1
-                                        sel.discard(r["id"])
                             if case_code in CASE_MAP:
                                 case_num, case_result = CASE_MAP[case_code]
-                                r["case"] = f"{case_code} {case_num} ({case_result})"
+                                case_val = f"{case_code} {case_num} ({case_result})"
                             else:
-                                r["case"] = ""
-                            r["legal"] = legal
-                            gcache[r["id"]] = True
+                                case_val = ""
+
+                            matched = [rr for rr in rows if rr["text"] == r["text"]]
+                            for rr in matched:
+                                if verdict == "악플":
+                                    rr["gem"] = f"🔴 악플: {reason}"
+                                    rr["label"] = "악플"
+                                    rr["severity"] = max(rr.get("severity", 0), 2)
+                                    sel.add(rr["id"])
+                                else:
+                                    if rr.get("severity", 0) >= 3:
+                                        rr["gem"] = f"🟡 AI는 아님 판단: {reason}"
+                                    else:
+                                        rr["gem"] = f"🟢 아님: {reason}"
+                                        if rr.get("severity", 0) == 2 and rr.get("category") != "신상노출":
+                                            rr["severity"] = 1
+                                            sel.discard(rr["id"])
+                                rr["case"] = case_val
+                                rr["legal"] = legal
+                                gcache[rr["id"]] = True
                     st.session_state["gcache"] = gcache
                     st.session_state["sel"] = sel
                     if not hit_limit:
@@ -683,7 +687,7 @@ if rows:
                 "판단 근거": r.get("reason", "미확인"),
                 "AI 점수": r.get("ai", "미확인"),
                 "생성형 AI 의견": r.get("gem", ""),
-                "법적 가능성": r.get("legal", "미확인"),
+                "법적 가능성": r.get("legal", ""),
                 "참고 판례": r.get("case", ""),
                 "원문": r.get("link", "미확인") if st.session_state.get("src") == "유튜브" else "미확인",
             }
