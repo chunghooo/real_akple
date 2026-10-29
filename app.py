@@ -136,7 +136,6 @@ def _ocr_image_to_lines(img_bytes):
     return cleaned
 
 
-
 def _parse_text_lines(raw_text):
     rows = []
     now = datetime.now(timezone.utc).isoformat()
@@ -372,9 +371,9 @@ if rows:
 
             def _is_target(r):
                 if scope == "악플 후보 전부 (정밀)":
-                    return r.get("severity", 0) >= 2
-                bad_ambiguous = r.get("severity", 0) >= 2 and (
-                    r.get("severity") == 1 or _ai_score(r) < 50
+                    return r.get("severity", 0) >= 1
+                bad_ambiguous = r.get("severity", 0) == 1 or (
+                    r.get("severity", 0) >= 2 and _ai_score(r) < 50
                 )
                 normal_mid = r.get("severity", 0) == 0 and 40 <= _ai_score(r) <= 64
                 return bad_ambiguous or normal_mid
@@ -408,6 +407,9 @@ if rows:
                     "아님: 칭찬·감탄 속 욕(예: 노래 지린다 ㅅㅂ), 혼잣말 감탄(예: 죽는 줄 알았다 이새끼), 자기 비하, "
                     "사물·상황에 대한 욕, 게임·스포츠 플레이 묘사, 인용·신고, 예의 있는 비판. "
                     "욕이 섞여도 특정인을 깎아내리지 않으면 아님, 욕이 없어도 특정인을 깎아내리면 악플. "
+                    "애매하면 악플로 판단해(최종 판단은 사람이 한다). 상대를 부르는 말(너, 니, 넌, 님, 저 사람, 얘)과 욕·비하가 함께 있으면 악플이다. "
+                    "예시: '병신아' → 악플 / '너 같은 병신은 처음 봄' → 악플 / 'tlqkf 꺼져' → 악플 / '얼굴 보니 답 없네' → 악플 / "
+                    "'노래 지린다 ㅅㅂ' → 아님 / '아 시발 버스 놓쳤네' → 아님 / '내가 병신이지' → 아님 "
                     'JSON 배열로만 답해: [{"i": 번호, "v": "악플" 또는 "아님", "r": "15자 이내 이유"}]'
                 )
                 try:
@@ -421,10 +423,10 @@ if rows:
                         if "generateContent" in m.get("supportedGenerationMethods", [])
                     ]
                     candidates_m = [m for m in candidates_m
-                                    if not any(x in m for x in ("tts", "image", "audio", "live", "embedding", "thinking"))]
+                                    if not any(x in m for x in ("tts", "image", "audio", "live", "embedding", "thinking", "preview", "exp"))]
                     flash_lite = [m for m in candidates_m if "flash-lite" in m]
                     flash = [m for m in candidates_m if "flash" in m and "lite" not in m]
-                    model_name = (flash_lite or flash or candidates_m)[-1]
+                    model_name = (flash or flash_lite or candidates_m)[-1]
 
                     hit_limit = False
                     for i in range(0, len(to_send), 50):
@@ -478,10 +480,13 @@ if rows:
                                 r["severity"] = max(r.get("severity", 0), 2)
                                 sel.add(r["id"])
                             else:
-                                r["gem"] = f"🟢 아님: {reason}"
-                                if r.get("severity", 0) >= 2 and r.get("category") != "신상노출":
-                                    r["severity"] = 1
-                                    sel.discard(r["id"])
+                                if r.get("severity", 0) >= 3:
+                                    r["gem"] = f"🟡 AI는 아님 판단: {reason}"
+                                else:
+                                    r["gem"] = f"🟢 아님: {reason}"
+                                    if r.get("severity", 0) == 2 and r.get("category") != "신상노출":
+                                        r["severity"] = 1
+                                        sel.discard(r["id"])
                             gcache[r["id"]] = True
                     st.session_state["gcache"] = gcache
                     st.session_state["sel"] = sel
