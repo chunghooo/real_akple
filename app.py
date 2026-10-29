@@ -395,9 +395,12 @@ if rows:
                 dedup.append(r)
             dedup = dedup[:200]
             to_send = [r for r in dedup if r["id"] not in gcache]
-            st.write(f"새로 보낼 것 {len(to_send)}개 (요청 약 {max(1, -(-len(to_send)//20))}회)")
+            st.write(f"새로 보낼 것 {len(to_send)}개 (요청 약 {max(1, -(-len(to_send)//10))}회)")
 
             run_gem = st.button("생성형 AI 검토 실행", key="gem_run", disabled=not consent)
+            model_used_caption = st.session_state.get("gem_model_used", "")
+            if model_used_caption:
+                st.caption(f"사용 모델: {model_used_caption}")
             if run_gem:
                 import requests
 
@@ -427,31 +430,39 @@ if rows:
                     flash_lite = [m for m in candidates_m if "flash-lite" in m]
                     flash = [m for m in candidates_m if "flash" in m and "lite" not in m]
                     model_name = (flash or flash_lite or candidates_m)[-1]
+                    st.session_state["gem_model_used"] = model_name
 
                     hit_limit = False
-                    for i in range(0, len(to_send), 20):
-                        batch = to_send[i:i + 20]
+                    for i in range(0, len(to_send), 10):
+                        batch = to_send[i:i + 10]
                         payload_text = instruction + "\n\n" + json.dumps(
                             [{"i": idx, "t": r["text"]} for idx, r in enumerate(batch)],
                             ensure_ascii=False,
                         )
-                        request_payload = {
-                            "contents": [{"parts": [{"text": payload_text}]}],
-                            "generationConfig": {
+
+                        def _build_payload(use_thinking):
+                            gen_config = {
                                 "temperature": 0,
                                 "responseMimeType": "application/json",
-                            },
-                            # 악플 원문을 검토해야 하므로 안전 필터가 요청 자체를 막지 않게 함
-                            "safetySettings": [
-                                {"category": c, "threshold": "BLOCK_NONE"}
-                                for c in ("HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH",
-                                          "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_DANGEROUS_CONTENT")
-                            ],
-                        }
+                            }
+                            if use_thinking:
+                                gen_config["thinkingConfig"] = {"thinkingBudget": 1024}
+                            return {
+                                "contents": [{"parts": [{"text": payload_text}]}],
+                                "generationConfig": gen_config,
+                                # 악플 원문을 검토해야 하므로 안전 필터가 요청 자체를 막지 않게 함
+                                "safetySettings": [
+                                    {"category": c, "threshold": "BLOCK_NONE"}
+                                    for c in ("HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH",
+                                              "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_DANGEROUS_CONTENT")
+                                ],
+                            }
+
+                        use_thinking = True
                         try:
                             resp = requests.post(
                                 f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={gem_key}",
-                                json=request_payload,
+                                json=_build_payload(use_thinking),
                                 timeout=180,
                             )
                         except requests.exceptions.Timeout:
@@ -460,16 +471,53 @@ if rows:
                                 hit_limit = True
                                 break
                             model_name = flash_lite[-1]
+                            st.session_state["gem_model_used"] = model_name
                             try:
                                 resp = requests.post(
                                     f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={gem_key}",
-                                    json=request_payload,
+                                    json=_build_payload(use_thinking),
                                     timeout=180,
                                 )
                             except requests.exceptions.Timeout:
                                 st.error("Gemini 응답이 너무 느려요. 잠시 후 다시 시도해 주세요.")
                                 hit_limit = True
                                 break
+
+                        if hit_limit:
+                            break
+
+                        if resp.status_code == 400:
+                            err_msg = ""
+                            try:
+                                err_msg = resp.json().get("error", {}).get("message", "")
+                            except Exception:
+                                err_msg = resp.text
+                            if "thinking" in err_msg.lower():
+                                use_thinking = False
+                                try:
+                                    resp = requests.post(
+                                        f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={gem_key}",
+                                        json=_build_payload(use_thinking),
+                                        timeout=180,
+                                    )
+                                except requests.exceptions.Timeout:
+                                    if not flash_lite:
+                                        st.error("Gemini 응답이 너무 느려요. 잠시 후 다시 시도해 주세요.")
+                                        hit_limit = True
+                                        break
+                                    model_name = flash_lite[-1]
+                                    st.session_state["gem_model_used"] = model_name
+                                    try:
+                                        resp = requests.post(
+                                            f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={gem_key}",
+                                            json=_build_payload(use_thinking),
+                                            timeout=180,
+                                        )
+                                    except requests.exceptions.Timeout:
+                                        st.error("Gemini 응답이 너무 느려요. 잠시 후 다시 시도해 주세요.")
+                                        hit_limit = True
+                                        break
+
                         if resp.status_code == 429:
                             st.error("오늘 Gemini 무료 사용량을 다 썼어요.")
                             hit_limit = True
