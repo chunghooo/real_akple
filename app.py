@@ -61,7 +61,28 @@ def _ocr_image_to_lines(img_bytes):
     scale = min(3.0, max(1.0, target_w / img.width))
     if scale > 1.0:
         img = img.resize((int(img.width * scale), int(img.height * scale)), Image.LANCZOS)
-    text = pytesseract.image_to_string(img, lang="kor+eng", config="--psm 6")
+    base = img
+
+    candidates = [
+        base,
+        base.point(lambda p: 255 if p > 180 else 0),
+        base.point(lambda p: 255 if p > 200 else 0),
+    ]
+    candidates = [ImageOps.expand(im, 40, fill=255) for im in candidates]
+
+    best_im = candidates[0]
+    best_conf = -1.0
+    for im in candidates:
+        data = pytesseract.image_to_data(
+            im, lang="kor+eng", config="--psm 6", output_type=pytesseract.Output.DICT
+        )
+        confs = [float(c) for c in data.get("conf", []) if float(c) >= 0]
+        avg_conf = sum(confs) / len(confs) if confs else -1.0
+        if avg_conf > best_conf:
+            best_conf = avg_conf
+            best_im = im
+
+    text = pytesseract.image_to_string(best_im, lang="kor+eng", config="--psm 6")
     raw_lines = [l.strip() for l in text.splitlines() if l.strip()]
 
     noise_words = ["답글", "좋아요", "싫어요", "공유", "신고", "선택됨"]
