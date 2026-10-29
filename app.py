@@ -58,6 +58,127 @@ def _parse_cases(text):
 
 CASE_MAP = _parse_cases(CASES)
 
+LAWS = [
+    {
+        "key": "insult",
+        "죄목": "모욕죄",
+        "조문": "형법 제311조",
+        "요건": "공연성 + 피해자 특정 + 경멸적 표현(사실 적시 없음)",
+        "법정형": "1년 이하 징역·금고 또는 200만원 이하 벌금",
+        "소추조건": "친고죄(형법 제312조 제1항)",
+        "고소기간": "범인을 안 날부터 6개월(형사소송법 제230조)",
+    },
+    {
+        "key": "defame_fact",
+        "죄목": "사실적시 명예훼손",
+        "조문": "정보통신망법 제70조 제1항",
+        "요건": "비방 목적 + 공연성 + 구체적 사실 적시",
+        "법정형": "3년 이하 징역 또는 3천만원 이하 벌금",
+        "소추조건": "반의사불벌죄(같은 조 제3항)",
+        "고소기간": "제한 없음",
+    },
+    {
+        "key": "defame_false",
+        "죄목": "허위사실 명예훼손",
+        "조문": "정보통신망법 제70조 제2항",
+        "요건": "비방 목적 + 공연성 + 거짓 사실 적시",
+        "법정형": "7년 이하 징역, 10년 이하 자격정지 또는 7천만원 이하 벌금",
+        "소추조건": "반의사불벌죄(같은 조 제3항)",
+        "고소기간": "제한 없음",
+    },
+    {
+        "key": "threat",
+        "죄목": "협박죄",
+        "조문": "형법 제283조 제1항",
+        "요건": "생명·신체·자유·명예·재산에 대한 해악 고지",
+        "법정형": "3년 이하 징역, 500만원 이하 벌금, 구류 또는 과료",
+        "소추조건": "반의사불벌죄(같은 조 제3항)",
+        "고소기간": "제한 없음",
+    },
+    {
+        "key": "repeat_fear",
+        "죄목": "공포심·불안감 유발 문언 반복 도달",
+        "조문": "정보통신망법 제74조 제1항 제3호",
+        "요건": "공포심·불안감 유발 내용 + 반복 도달",
+        "법정형": "1년 이하 징역 또는 1천만원 이하 벌금",
+        "소추조건": "반의사불벌죄(같은 조 제2항)",
+        "고소기간": "제한 없음",
+    },
+    {
+        "key": "sexual",
+        "죄목": "통신매체이용음란",
+        "조문": "성폭력처벌법 제13조",
+        "요건": "성적 욕망 목적 + 성적 수치심 유발 내용이 상대방에게 도달",
+        "법정형": "2년 이하 징역 또는 2천만원 이하 벌금",
+        "소추조건": "해당 없음",
+        "고소기간": "제한 없음",
+    },
+    {
+        "key": "stalking",
+        "죄목": "스토킹범죄",
+        "조문": "스토킹처벌법 제2조·제18조",
+        "요건": "상대방 의사에 반한 지속적·반복적 연락으로 불안감 유발",
+        "법정형": "3년 이하 징역 또는 3천만원 이하 벌금",
+        "소추조건": "해당 없음(2023년 반의사불벌 삭제)",
+        "고소기간": "제한 없음",
+    },
+    {
+        "key": "privacy",
+        "죄목": "개인정보 유출(신상 공개)",
+        "조문": "개인정보 보호법 제59조 제3호·제71조 제10호",
+        "요건": "권한 없이 타인의 개인정보를 이용·유출",
+        "법정형": "5년 이하 징역 또는 5천만원 이하 벌금",
+        "소추조건": "해당 없음",
+        "고소기간": "제한 없음",
+    },
+]
+
+GUIDE = [
+    "- 신고 경로: 경찰청 사이버범죄 신고시스템(ECRM) 온라인 접수, 가까운 경찰서 방문 고소, 플랫폼 자체 신고(삭제 요청)",
+    "- 준비할 증거: 이 보고서, 댓글 URL과 작성 시각, 작성자 닉네임·채널 주소, 화면 캡처, 원본 데이터 파일(SHA-256 값 포함)",
+    "- 작성자의 실명을 몰라도 닉네임·채널 정보로 고소할 수 있으며, 신원 확인은 수사기관이 진행합니다.",
+    "- 모욕죄는 친고죄이므로 피해자 본인이 범인을 안 날부터 6개월 안에 고소해야 합니다.",
+    "- 맞대응 댓글이나 작성자 신상 공개는 오히려 본인이 처벌받을 수 있으니 하지 마세요.",
+    "- 형사 고소와 별도로 민사 손해배상 청구도 가능합니다.",
+]
+
+
+def pick_laws(selected_rows):
+    keys = []
+
+    def add(k):
+        if k not in keys:
+            keys.append(k)
+
+    author_counts = Counter(r.get("author", "미확인") for r in selected_rows)
+    author_threat_counts = Counter()
+
+    for r in selected_rows:
+        blob = f"{r.get('category', '')} {r.get('law', '')} {r.get('statute', '')} {r.get('reason', '')}"
+        if "모욕" in blob:
+            add("insult")
+        if "명예훼손" in blob:
+            add("defame_fact")
+            add("defame_false")
+        if "협박" in blob or "위협" in blob:
+            add("threat")
+            author_threat_counts[r.get("author", "미확인")] += 1
+        if "성희롱" in blob or "성적" in blob:
+            add("sexual")
+        if "신상" in blob:
+            add("privacy")
+
+    if any(c >= 2 for c in author_threat_counts.values()):
+        add("repeat_fear")
+    if any(c >= 3 for c in author_counts.values()):
+        add("stalking")
+
+    if not keys:
+        add("insult")
+
+    return [law for law in LAWS if law["key"] in keys]
+
+
 st.title("🛡️ EVIDA")
 st.caption("AI 악플 분석 및 증거자료 생성 서비스 — 신고·고소 준비를 돕는 참고자료를 만들어 드립니다.")
 
@@ -754,6 +875,28 @@ if rows:
     else:
         st.info("선택된 댓글이 없습니다.")
 
+    picked_laws = pick_laws(selected_rows)
+
+    with st.expander("⚖️ 적용 가능 법률 및 신고 안내"):
+        st.dataframe(
+            pd.DataFrame(
+                [
+                    {
+                        "죄목": law["죄목"],
+                        "조문": law["조문"],
+                        "요건": law["요건"],
+                        "법정형": law["법정형"],
+                        "소추조건": law["소추조건"],
+                        "고소기간": law["고소기간"],
+                    }
+                    for law in picked_laws
+                ]
+            ),
+            hide_index=True,
+        )
+        st.markdown("\n".join(GUIDE))
+        st.caption("법률 자문이 아닌 참고 정보입니다. 정확한 판단은 변호사·경찰과 상담하세요.")
+
     st.divider()
     header_col, info_col = st.columns([2, 1])
     header_col.subheader("📄 증거자료 생성")
@@ -850,6 +993,8 @@ if rows:
                 "sha256": st.session_state.get("sha", ""),
                 "total": len(rows),
                 "images": st.session_state.get("imgs", []),
+                "laws": picked_laws,
+                "guide": GUIDE,
             }
             case = {
                 "title": case_title,
