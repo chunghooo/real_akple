@@ -429,7 +429,7 @@ if rows:
                                     if not any(x in m for x in ("tts", "image", "audio", "live", "embedding", "thinking", "preview", "exp"))]
                     flash_lite = [m for m in candidates_m if "flash-lite" in m]
                     flash = [m for m in candidates_m if "flash" in m and "lite" not in m]
-                    model_name = (flash or flash_lite or candidates_m)[-1]
+                    model_name = (flash_lite or flash or candidates_m)[-1]
                     st.session_state["gem_model_used"] = model_name
 
                     hit_limit = False
