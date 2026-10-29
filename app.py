@@ -133,6 +133,8 @@ LAWS = [
     },
 ]
 
+LAW_NAME = {law["key"]: law["죄목"] for law in LAWS}
+
 GUIDE = [
     "- 신고 경로: 경찰청 사이버범죄 신고시스템(ECRM) 온라인 접수, 가까운 경찰서 방문 고소, 플랫폼 자체 신고(삭제 요청)",
     "- 준비할 증거: 이 보고서, 댓글 URL과 작성 시각, 작성자 닉네임·채널 주소, 화면 캡처, 원본 데이터 파일(SHA-256 값 포함)",
@@ -143,40 +145,73 @@ GUIDE = [
 ]
 
 
-def pick_laws(selected_rows):
+def law_keys_for_row(r, author_counts, author_threat_counts):
     keys = []
 
     def add(k):
         if k not in keys:
             keys.append(k)
 
+    blob = f"{r.get('category', '')} {r.get('law', '')} {r.get('statute', '')} {r.get('reason', '')}"
+    if "모욕" in blob:
+        add("insult")
+    if "명예훼손" in blob:
+        add("defame_fact")
+        add("defame_false")
+    if "협박" in blob or "위협" in blob:
+        add("threat")
+    if "성희롱" in blob or "성적" in blob:
+        add("sexual")
+    if "신상" in blob:
+        add("privacy")
+        
+    author = r.get("author", "미확인")
+    if author != "미확인" and "threat" in keys and author_threat_counts.get(author, 0) >= 2:
+        add("repeat_fear")
+    if author != "미확인" and author_counts.get(author, 0) >= 3:
+        add("stalking")
+
+
+    return keys
+
+
+def pick_laws(selected_rows):
     author_counts = Counter(r.get("author", "미확인") for r in selected_rows)
     author_threat_counts = Counter()
-
     for r in selected_rows:
         blob = f"{r.get('category', '')} {r.get('law', '')} {r.get('statute', '')} {r.get('reason', '')}"
-        if "모욕" in blob:
-            add("insult")
-        if "명예훼손" in blob:
-            add("defame_fact")
-            add("defame_false")
         if "협박" in blob or "위협" in blob:
-            add("threat")
             author_threat_counts[r.get("author", "미확인")] += 1
-        if "성희롱" in blob or "성적" in blob:
-            add("sexual")
-        if "신상" in blob:
-            add("privacy")
 
-    if any(c >= 2 for c in author_threat_counts.values()):
-        add("repeat_fear")
-    if any(c >= 3 for c in author_counts.values()):
-        add("stalking")
+    keys = []
+
+    def add(k):
+        if k not in keys:
+            keys.append(k)
+
+    for r in selected_rows:
+        for k in law_keys_for_row(r, author_counts, author_threat_counts):
+            add(k)
 
     if not keys:
         add("insult")
 
     return [law for law in LAWS if law["key"] in keys]
+
+
+def law_evidence_map(selected_rows, picked_laws, author_counts, author_threat_counts):
+    row_keys = [(r, law_keys_for_row(r, author_counts, author_threat_counts)) for r in selected_rows]
+    any_keys = any(keys for _, keys in row_keys)
+
+    evidence = {}
+    for law in picked_laws:
+        key = law["key"]
+        if not any_keys and key == "insult":
+            evidence[key] = "전체(유형 미분류)"
+        else:
+            evs = [r.get("ev", "") for r, keys in row_keys if key in keys]
+            evidence[key] = ", ".join(evs)
+    return evidence
 
 
 st.title("🛡️ EVIDA")
@@ -856,16 +891,32 @@ if rows:
             r["reason"] = f"{r.get('reason', '')} · 참고 판례: {r['case']}"
     selected_rows.sort(key=lambda r: r.get("time", ""))
 
+    for idx, r in enumerate(selected_rows, start=1):
+        r["ev"] = f"EV-{idx:03d}"
+
+    author_counts = Counter(r.get("author", "미확인") for r in selected_rows)
+    author_threat_counts = Counter()
+    for r in selected_rows:
+        blob = f"{r.get('category', '')} {r.get('law', '')} {r.get('statute', '')} {r.get('reason', '')}"
+        if "협박" in blob or "위협" in blob:
+            author_threat_counts[r.get("author", "미확인")] += 1
+
     st.markdown("### 선택 목록")
     if selected_rows:
         st.dataframe(
             pd.DataFrame(
                 [
                     {
+                        "증거번호": r.get("ev", ""),
                         "작성 시각": _kst(r.get("time", "")),
                         "작성자": r.get("author", "미확인"),
                         "내용": r.get("text", ""),
                         "메모": r.get("memo", ""),
+                        "해당 법률": ", ".join(
+                            LAW_NAME[k]
+                            for k in law_keys_for_row(r, author_counts, author_threat_counts)
+                            if k in LAW_NAME
+                        ),
                     }
                     for r in selected_rows
                 ]
@@ -876,12 +927,14 @@ if rows:
         st.info("선택된 댓글이 없습니다.")
 
     picked_laws = pick_laws(selected_rows)
+    law_evidence = law_evidence_map(selected_rows, picked_laws, author_counts, author_threat_counts)
 
     with st.expander("⚖️ 적용 가능 법률 및 신고 안내"):
         st.dataframe(
             pd.DataFrame(
                 [
                     {
+                        "해당 증거": law_evidence.get(law["key"], ""),
                         "죄목": law["죄목"],
                         "조문": law["조문"],
                         "요건": law["요건"],
@@ -986,6 +1039,13 @@ if rows:
             st.warning(f"빠진 필수 항목이 있습니다: {', '.join(missing)}")
             st.button("⬇️ 증거 정리 보고서 다운로드", disabled=True, type="primary")
         else:
+            laws_for_pdf = []
+            for law in picked_laws:
+                law_copy = dict(law)
+                ev_str = law_evidence.get(law["key"], "")
+                law_copy["죄목"] = f"{law['죄목']}\n({ev_str})"
+                laws_for_pdf.append(law_copy)
+
             meta = {
                 "src": st.session_state.get("src", "미확인"),
                 "url": st.session_state.get("url", ""),
@@ -993,7 +1053,7 @@ if rows:
                 "sha256": st.session_state.get("sha", ""),
                 "total": len(rows),
                 "images": st.session_state.get("imgs", []),
-                "laws": picked_laws,
+                "laws": laws_for_pdf,
                 "guide": GUIDE,
             }
             case = {
