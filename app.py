@@ -395,7 +395,7 @@ if rows:
                 dedup.append(r)
             dedup = dedup[:200]
             to_send = [r for r in dedup if r["id"] not in gcache]
-            st.write(f"새로 보낼 것 {len(to_send)}개 (요청 약 {max(1, -(-len(to_send)//50))}회)")
+            st.write(f"새로 보낼 것 {len(to_send)}개 (요청 약 {max(1, -(-len(to_send)//20))}회)")
 
             run_gem = st.button("생성형 AI 검토 실행", key="gem_run", disabled=not consent)
             if run_gem:
@@ -429,29 +429,47 @@ if rows:
                     model_name = (flash or flash_lite or candidates_m)[-1]
 
                     hit_limit = False
-                    for i in range(0, len(to_send), 50):
-                        batch = to_send[i:i + 50]
+                    for i in range(0, len(to_send), 20):
+                        batch = to_send[i:i + 20]
                         payload_text = instruction + "\n\n" + json.dumps(
                             [{"i": idx, "t": r["text"]} for idx, r in enumerate(batch)],
                             ensure_ascii=False,
                         )
-                        resp = requests.post(
-                            f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={gem_key}",
-                            json={
-                                "contents": [{"parts": [{"text": payload_text}]}],
-                                "generationConfig": {
-                                    "temperature": 0,
-                                    "responseMimeType": "application/json",
-                                },
-                                # 악플 원문을 검토해야 하므로 안전 필터가 요청 자체를 막지 않게 함
-                                "safetySettings": [
-                                    {"category": c, "threshold": "BLOCK_NONE"}
-                                    for c in ("HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH",
-                                              "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_DANGEROUS_CONTENT")
-                                ],
+                        request_payload = {
+                            "contents": [{"parts": [{"text": payload_text}]}],
+                            "generationConfig": {
+                                "temperature": 0,
+                                "responseMimeType": "application/json",
                             },
-                            timeout=60,
-                        )
+                            # 악플 원문을 검토해야 하므로 안전 필터가 요청 자체를 막지 않게 함
+                            "safetySettings": [
+                                {"category": c, "threshold": "BLOCK_NONE"}
+                                for c in ("HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH",
+                                          "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_DANGEROUS_CONTENT")
+                            ],
+                        }
+                        try:
+                            resp = requests.post(
+                                f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={gem_key}",
+                                json=request_payload,
+                                timeout=180,
+                            )
+                        except requests.exceptions.Timeout:
+                            if not flash_lite:
+                                st.error("Gemini 응답이 너무 느려요. 잠시 후 다시 시도해 주세요.")
+                                hit_limit = True
+                                break
+                            model_name = flash_lite[-1]
+                            try:
+                                resp = requests.post(
+                                    f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={gem_key}",
+                                    json=request_payload,
+                                    timeout=180,
+                                )
+                            except requests.exceptions.Timeout:
+                                st.error("Gemini 응답이 너무 느려요. 잠시 후 다시 시도해 주세요.")
+                                hit_limit = True
+                                break
                         if resp.status_code == 429:
                             st.error("오늘 Gemini 무료 사용량을 다 썼어요.")
                             hit_limit = True
@@ -477,6 +495,7 @@ if rows:
                             reason = item.get("r", "")
                             if verdict == "악플":
                                 r["gem"] = f"🔴 악플: {reason}"
+                                r["label"] = "악플"
                                 r["severity"] = max(r.get("severity", 0), 2)
                                 sel.add(r["id"])
                             else:
