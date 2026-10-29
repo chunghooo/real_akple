@@ -76,8 +76,19 @@ def _ocr_image_to_lines(img_bytes):
 
         m = mention_pattern.search(line)
         if m:
-            pending_author = m.group(0).lstrip("@").strip()
-            continue
+            author = m.group(0).lstrip("@").strip()
+            rest = (line[:m.start()] + line[m.end():]).strip()
+            if len(rest) >= 2:
+                for w in noise_words:
+                    rest = rest.replace(w, "")
+                rest = time_pattern.sub("", rest).strip()
+                if rest:
+                    cleaned.append(f"[@{author}] {rest}")
+                pending_author = None
+                continue
+            else:
+                pending_author = author
+                continue
 
         work_line = line
         for w in noise_words:
@@ -102,6 +113,7 @@ def _ocr_image_to_lines(img_bytes):
         else:
             cleaned.append(work_line)
     return cleaned
+
 
 
 def _parse_text_lines(raw_text):
