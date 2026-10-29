@@ -380,6 +380,49 @@ def _build_conclusion(selected, meta, styles):
 
 
 # ----------------------------------------------------------------------------
+# 8. 적용 가능 법률 및 신고 안내
+# ----------------------------------------------------------------------------
+def _build_law_page(meta, styles):
+    laws = meta.get("laws")
+    if not laws:
+        return []
+
+    flow = [Paragraph("8. 적용 가능 법률 및 신고 안내", styles["section"])]
+    header = [_p(h, styles["cellhead"]) for h in
+               ("죄목", "근거 조문", "성립 요건", "법정형", "소추조건·고소기간")]
+    data = [header]
+    for law in laws:
+        prosecution = law.get("소추조건") or ""
+        period = law.get("고소기간") or ""
+        combined = " · ".join([x for x in (prosecution, period) if x]) or "미확인"
+        data.append([
+            _p(_v(law.get("죄목")), styles["cell"]),
+            _p(_v(law.get("조문")), styles["cell"]),
+            _p(_v(law.get("요건")), styles["cell"]),
+            _p(_v(law.get("법정형")), styles["cell"]),
+            _p(combined, styles["cell"]),
+        ])
+    t = Table(data, colWidths=[2.8 * cm, 2.8 * cm, 4.6 * cm, 3.2 * cm, 3.6 * cm], repeatRows=1)
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), C_TABLEHEAD),
+        ("GRID", (0, 0), (-1, -1), 0.5, C_LINE),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4), ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    flow.append(t)
+    flow.append(Spacer(1, 10))
+
+    flow.append(Paragraph("신고 안내", styles["section"]))
+    guide = meta.get("guide") or []
+    if isinstance(guide, str):
+        guide = [guide]
+    guide_lines = list(guide) + ["※ 법률 자문이 아닌 참고 정보입니다."]
+    flow.append(_p("\n".join(guide_lines), styles["body"]))
+    return flow
+
+
+# ----------------------------------------------------------------------------
 # 진입점
 # ----------------------------------------------------------------------------
 def make_pdf(selected, meta, case):
@@ -403,6 +446,11 @@ def make_pdf(selected, meta, case):
         story += _build_attachments(meta["images"], styles)
     story.append(PageBreak())
     story += _build_conclusion(selected, meta, styles)
+
+    law_flow = _build_law_page(meta, styles)
+    if law_flow:
+        story.append(PageBreak())
+        story += law_flow
 
     doc.build(story, onFirstPage=_header_footer, onLaterPages=_header_footer)
     return buf.getvalue()
@@ -432,8 +480,8 @@ if __name__ == "__main__":
                     law="모욕죄(형법 제311조) 의심", ai=0.82, gem="문맥상 모욕적 표현으로 보임",
                     statute="형법 제311조", target="", memo="")
 
-    meta = dict(src="youtube", url="https://youtube.com/watch?v=abc",
-                collected_at="2024-05-01T13:00:00Z", sha256="deadbeef" * 8, total=50, images=[])
+    base_meta = dict(src="youtube", url="https://youtube.com/watch?v=abc",
+                      collected_at="2024-05-01T13:00:00Z", sha256="deadbeef" * 8, total=50, images=[])
     case = dict(title="", platform="YouTube", period="2024.04 ~ 2024.05", story="", harm="", note="")
 
     emoji_text = "이 영상 진짜 😡🤬 어이없네 ㅋㅋㅋ 🤡 완전 쓰레기같음"
@@ -450,7 +498,28 @@ if __name__ == "__main__":
 
     for name, rows in tests.items():
         try:
-            pdf_bytes = make_pdf(rows, meta, case)
+            pdf_bytes = make_pdf(rows, base_meta, case)
             print(f"[{name}] 성공 - 쪽수: {_count_pages(pdf_bytes)}, 크기: {len(pdf_bytes)} bytes")
         except Exception as e:
             print(f"[{name}] 실패 - {e}")
+
+    # 법률 안내 페이지 테스트
+    laws_sample = [
+        dict(죄목="모욕죄", 조문="형법 제311조", 요건="공연히 사람을 모욕한 경우",
+             법정형="1년 이하 징역·금고 또는 200만원 이하 벌금",
+             소추조건="친고죄", 고소기간="범인을 안 날부터 6개월"),
+        dict(죄목="명예훼손죄", 조문="형법 제307조", 요건="공연히 사실 또는 허위사실을 적시",
+             법정형="2년 이하 징역 또는 500만원 이하 벌금(허위사실 가중)",
+             소추조건="반의사불벌죄", 고소기간=""),
+    ]
+    meta_with_laws = dict(base_meta, laws=laws_sample,
+                           guide=["관할 경찰서 사이버수사팀 또는 사이버범죄 신고시스템(ECRM)을 통해 신고할 수 있습니다.",
+                                  "증거 원본과 URL을 함께 보관하는 것이 좋습니다."])
+    meta_without_laws = dict(base_meta, laws=[])
+
+    for name, meta_case in (("법률 있음", meta_with_laws), ("법률 없음", meta_without_laws)):
+        try:
+            pdf_bytes = make_pdf([_make_comment(1, emoji_text)], meta_case, case)
+            print(f"[법률페이지-{name}] 성공 - 쪽수: {_count_pages(pdf_bytes)}, 크기: {len(pdf_bytes)} bytes")
+        except Exception as e:
+            print(f"[법률페이지-{name}] 실패 - {e}")
