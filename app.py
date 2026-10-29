@@ -50,6 +50,7 @@ def _has_ocr():
 def _ocr_image_to_lines(img_bytes):
     from PIL import Image, ImageOps
     import io
+    import re
     import pytesseract
 
     img = Image.open(io.BytesIO(img_bytes)).convert("L")
@@ -59,38 +60,47 @@ def _ocr_image_to_lines(img_bytes):
     target_w = 1400
     scale = min(3.0, max(1.0, target_w / img.width))
     if scale > 1.0:
-        img = img.resize((int(img.width * scale), int(img.height * scale)))
+        img = img.resize((int(img.width * scale), int(img.height * scale)), Image.LANCZOS)
     text = pytesseract.image_to_string(img, lang="kor+eng", config="--psm 6")
     raw_lines = [l.strip() for l in text.splitlines() if l.strip()]
 
     noise_words = ["답글", "좋아요", "싫어요", "공유", "신고", "선택됨"]
-    import re
+    time_pattern = re.compile(r"\d+\s*(분|시간|일)\s*전")
+    mention_pattern = re.compile(r"@[\w.\-가-힣]+")
 
     cleaned = []
     pending_author = None
     for line in raw_lines:
-        if line.startswith("@"):
-            pending_author = line.lstrip("@").strip()
-            continue
-        if line == "선택됨":
-            continue
-        if any(w in line for w in noise_words):
-            continue
-        if re.search(r"\d+\s*분\s*전", line):
+        if "선택됨" in line:
             continue
 
-        kor = len(re.findall(r"[가-힣]", line))
-        words = line.split()
+        m = mention_pattern.search(line)
+        if m:
+            pending_author = m.group(0).lstrip("@").strip()
+            continue
+
+        work_line = line
+        for w in noise_words:
+            work_line = work_line.replace(w, "")
+        work_line = time_pattern.sub("", work_line)
+        work_line = work_line.strip()
+        if not work_line:
+            continue
+
+        kor = len(re.findall(r"[가-힣]", work_line))
+        words = work_line.split()
         upper_ratio = (
-            sum(1 for ch in line if ch.isalpha() and ch.isupper()) / max(1, sum(1 for ch in line if ch.isalpha()))
+            sum(1 for ch in work_line if ch.isalpha() and ch.isupper()) / max(1, sum(1 for ch in work_line if ch.isalpha()))
         )
         ok = kor >= 2 or (len(words) >= 3 and upper_ratio < 0.5)
         if not ok:
             continue
 
-        author = pending_author if pending_author else "미확인"
-        pending_author = None
-        cleaned.append(f"[@{author}] {line}")
+        if pending_author:
+            cleaned.append(f"[@{pending_author}] {work_line}")
+            pending_author = None
+        else:
+            cleaned.append(work_line)
     return cleaned
 
 
